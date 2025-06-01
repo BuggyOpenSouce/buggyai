@@ -1,0 +1,17 @@
+directories:
+  output: release/
+  buildResources: assets
+appId: com.buggyai.app
+productName: BuggyAI
+files:
+  - filter:
+      - dist/**/*
+      - electron/**/*
+      - package.json
+win:
+  icon: assets/icon.ico
+mac:
+  icon: assets/icon.icns
+linux:
+  icon: assets/icon.png
+electronVersion: 36.3.2
