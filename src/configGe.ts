@@ -5,7 +5,7 @@ const GEMINI_API_KEY = 'AIzaSyCJxkoFwqfii8Y8mGEQ4cwiU4o0Anrh3gs';
 const GEMINI_MODEL_ID = 'gemini-1.5-flash-latest'; // Bu model video destekler
 
 const SITE_URL = 'https://buggyai.netlify.app';
-const SITE_NAME = 'BuggyAI (Gemini)';
+const SITE_NAME = 'BuggyAI faster';
 
 const SYSTEM_PROMPT_GEMINI = `Ben BuggyCompany tarafından geliştirilen ve Gemini tabanlı BuggyAI.
 {{#if userProfile}}
