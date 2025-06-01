@@ -1,4 +1,5 @@
-import { InferenceClient } from "@huggingface/inference";
+// project/src/confighuggingtext.ts
+// import { InferenceClient } from "@huggingface/inference"; // Removed static import
 
 export const HF_ACCESS_TOKEN = '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';
 
@@ -48,6 +49,9 @@ function isProviderOnCooldown(providerId: string): boolean {
 
 export async function makeHFAPIRequest(messages: any[]) {
   const provider = getCurrentHFProvider();
+  
+  // Dynamically import InferenceClient
+  const { InferenceClient } = await import("@huggingface/inference");
   const client = new InferenceClient(provider.key);
 
   try {
