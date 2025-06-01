@@ -1,5 +1,6 @@
 // project/src/utils/api.ts
 import { AI_PROVIDERS, SITE_URL, SITE_NAME, SYSTEM_PROMPT } from '../config';
+import { makeHFAPIRequest } from '../confighuggingtext';
 import type { Message, UserProfile, AISettings, DailyJournalEntry, JournalLogItem } from '../types';
 
 let currentProviderIndex = 0;
@@ -27,7 +28,7 @@ function formatJournalForPrompt(journal: DailyJournalEntry[], maxDays: number = 
   if (!journal || journal.length === 0) return "";
 
   let formattedJournal = "";
-  const recentDays = journal.slice(-maxDays).reverse(); // En son günlerden başla
+  const recentDays = journal.slice(-maxDays).reverse();
 
   for (const dailyEntry of recentDays) {
     formattedJournal += `\nTarih: ${dailyEntry.date}\n`;
@@ -35,7 +36,6 @@ function formatJournalForPrompt(journal: DailyJournalEntry[], maxDays: number = 
     for (const log of recentLogs) {
       const logTime = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const rolePrefix = log.type === 'user' ? "Kullanıcı:" : "Asistan:";
-      // İçeriği kısaltarak prompt'u çok uzatmaktan kaçın
       const shortContent = log.content.length > 150 ? log.content.substring(0, 147) + "..." : log.content;
       formattedJournal += `- (${logTime}) ${rolePrefix} ${shortContent}\n`;
     }
@@ -49,6 +49,30 @@ export async function makeAPIRequest(
   aiSettings?: AISettings | null,
   journal?: DailyJournalEntry[] | null
 ) {
+  const provider = AI_PROVIDERS[currentProviderIndex];
+  
+  // If the provider is HuggingFace, use the HF API
+  if (provider.type === 'huggingface') {
+    try {
+      const formattedMessages = messages.map(msg => ({
+        role: msg.role,
+        content: msg.images ? [
+          { type: "text", text: msg.content },
+          ...msg.images.map(img => ({
+            type: "image_url",
+            image_url: { url: img }
+          }))
+        ] : msg.content
+      }));
+
+      return await makeHFAPIRequest(formattedMessages);
+    } catch (error) {
+      console.error('HuggingFace API Error:', error);
+      throw error;
+    }
+  }
+
+  // Regular OpenRouter API request
   let attempts = 0;
   const maxAttempts = AI_PROVIDERS.length * MAX_RETRIES;
 
@@ -60,7 +84,6 @@ export async function makeAPIRequest(
 
   let systemPromptContent = SYSTEM_PROMPT;
 
-  // Günlük içeriğini prompt'a ekle
   const recentJournalEntriesString = journal ? formatJournalForPrompt(journal) : "";
   if (recentJournalEntriesString) {
     systemPromptContent = systemPromptContent
@@ -69,7 +92,7 @@ export async function makeAPIRequest(
         .replace('{{/if}}', '');
   } else {
      systemPromptContent = systemPromptContent
-        .replace(/\{\{#if recentJournalEntries\}\}[\s\S]*?\{\{\/if\}\}/g, ''); // Placeholder'ı ve koşulunu kaldır
+        .replace(/\{\{#if recentJournalEntries\}\}[\s\S]*?\{\{\/if\}\}/g, '');
   }
 
   if (userProfile && userProfile.nickname && userProfile.nickname !== 'Guest') {
@@ -96,16 +119,12 @@ export async function makeAPIRequest(
     const elseMatch = SYSTEM_PROMPT.match(/\{\{else\}\}([\s\S]*?)\{\{\/if\}\}/);
     let baseElseContent = elseMatch ? elseMatch[1].trim() : "Merhaba! Ben BuggyAI. Seninle tanışmak isterim. Bana biraz kendinden bahseder misin?";
     
-    // Temel Markdown talimatlarını "else" bloğuna da ekleyelim.
-    // Bu talimatlar ana prompt'tan kaldırılıp sadece buraya eklenebilir veya her iki yerde de tutulabilir.
-    // Şimdilik, eğer userProfile yoksa, Markdown talimatlarının eklendiğinden emin olalım.
     const markdownInstruction = "Lütfen cevaplarında metin formatlaması için Markdown sözdizimini kullan. Kalın metin için **metin**, italik için *metin*, üstü çizili için ~~metin~~ ve altı çizili için <u>metin</u> kullanabilirsin. Matematiksel ifadeler için LaTeX sözdizimini satır içinde $ifade$ veya blok olarak $$ifade$$ şeklinde kullan.";
-    if (!baseElseContent.includes(markdownInstruction.substring(0,30))) { // Basit bir kontrol
+    if (!baseElseContent.includes(markdownInstruction.substring(0,30))) {
         baseElseContent += `\n\n${markdownInstruction}`;
     }
 
     systemPromptContent = systemPromptContent.replace(/\{\{#if userProfile\}\}[\s\S]*?(\{\{else\}\}[\s\S]*?)?\{\{\/if\}\}/g, baseElseContent);
-    // Kalan placeholder'ları temizle
     systemPromptContent = systemPromptContent.replace(/\{\{userProfile\.nickname\}\}/g, 'Kullanıcı');
     systemPromptContent = systemPromptContent.replace(/\{\{#if userProfile\.interests_string_with_status\}\}[\s\S]*?\{\{\/if\}\}/g, '');
   }

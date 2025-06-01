@@ -62,6 +62,14 @@ export const AI_PROVIDERS = [
     available: true,
     busy: false,
   },
+  {
+    id: 'buggyai-hf',
+    key: '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',
+    model: 'Qwen/Qwen2.5-VL-32B-Instruct',
+    available: true,
+    busy: false,
+    type: 'huggingface'
+  }
 ];
 
 export const SITE_URL = 'https://buggyai.netlify.app';
