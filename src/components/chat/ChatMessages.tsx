@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useMemo } from 'react';
 import type { Message, UserProfile } from '../../types';
-import ChatMessage from './ChatMessage';
+import { ChatMessage } from './ChatMessage'; // Değişiklik: Adlandırılmış içe aktarım
 import LoadingIndicator from '../LoadingIndicator';
 
 interface ChatMessagesProps {
