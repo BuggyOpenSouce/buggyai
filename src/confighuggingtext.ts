@@ -6,7 +6,7 @@ const OLLAMA_API_URL = 'http://localhost:11434/api/chat';
 // Ollama'da kullanmak istediğiniz modelin adı (Ollama'ya pull ettiğiniz model adı)
 // Örneğin: "llama3:latest", "qwen:7b", "mistral:latest"
 // Bu değeri projenizin ihtiyacına göre veya kullanıcı ayarlarından alınabilir hale getirebilirsiniz.
-const OLLAMA_MODEL_ID = "qwen:latest"; // Örnek olarak Qwen, bunu `ollama pull qwen` ile indirmelisiniz.
+const OLLAMA_MODEL_ID = "qwen3:30b"; // Örnek olarak Qwen, bunu `ollama pull qwen` ile indirmelisiniz.
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
