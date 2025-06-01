@@ -4,7 +4,7 @@ import type { Message, UserProfile, AISettings, DailyJournalEntry } from './type
 // Gemini API anahtarınızı ve model adınızı buraya ekleyin
 const GEMINI_API_KEY = 'AIzaSyCJxkoFwqfii8Y8mGEQ4cwiU4o0Anrh3gs'; // Kullanıcının sağladığı API anahtarı
 // Model ID'sini güncelleyelim:
-const GEMINI_MODEL_ID = 'gemini-2.5-pro-preview-05-06'; // Eski: 'gemini-pro'
+const GEMINI_MODEL_ID = 'gemini-2.0-flash'; // Eski: 'gemini-pro'
 
 const SITE_URL = 'https://buggyai.netlify.app';
 const SITE_NAME = 'BuggyAI (Gemini)';
