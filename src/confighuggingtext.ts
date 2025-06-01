@@ -3,14 +3,22 @@
 // Ollama yerel API endpoint'i
 const OLLAMA_API_URL = 'http://localhost:11434/api/chat';
 
-// Ollama'da kullanmak istediğiniz modelin adı (Ollama'ya pull ettiğiniz model adı)
-// Örneğin: "llama3:latest", "qwen:7b", "mistral:latest"
-// Bu değeri projenizin ihtiyacına göre veya kullanıcı ayarlarından alınabilir hale getirebilirsiniz.
-const OLLAMA_MODEL_ID = "phi4:14b"; // Örnek olarak Qwen, bunu `ollama pull qwen` ile indirmelisiniz.
+// Ollama'da kullanmak istediğiniz modelin adı
+const OLLAMA_MODEL_ID = "phi4:14b";
 
-interface ChatMessage {
+// makeHFAPIRequest fonksiyonunun utils/api.ts'den alabileceği mesaj formatı
+interface InputMessage {
+  role: "user" | "assistant" | "system";
+  content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+}
+
+// Ollama API'sine gönderilecek mesaj formatı
+// phi4:14b gibi metin tabanlı modeller için content string olmalıdır.
+interface OllamaApiChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  // images?: string[]; // Eğer phi4:14b multimodalsa ve base64 görselleri destekliyorsa burası kullanılabilirdi.
+                       // Şu anki phi4:14b kullanımı için sadece metin varsayıyoruz.
 }
 
 // src/utils/api.ts dosyasının beklediği çıktı formatı
@@ -29,15 +37,30 @@ interface FormattedChatCompletionOutput {
   object?: string;
 }
 
-export async function makeHFAPIRequest(messages: ChatMessage[]): Promise<FormattedChatCompletionOutput> {
-  // Fonksiyon adını makeOllamaAPIRequest olarak değiştirebilirsiniz, şimdilik aynı bırakıyorum.
-
-  // Ollama'nın çalışıp çalışmadığını veya modelin varlığını kontrol etmek için ek mantık eklenebilir.
-  // Şimdilik direkt istek gönderiyoruz.
+export async function makeHFAPIRequest(messages: InputMessage[]): Promise<FormattedChatCompletionOutput> {
+  // Gelen mesajları Ollama'nın beklediği formata dönüştür
+  const ollamaMessages: OllamaApiChatMessage[] = messages.map(msg => {
+    let textContent = "";
+    if (typeof msg.content === 'string') {
+      textContent = msg.content;
+    } else if (Array.isArray(msg.content)) {
+      // OpenAI'nin multimodal formatından metin içeriğini çıkar
+      const textPart = msg.content.find(part => part.type === 'text');
+      if (textPart && 'text' in textPart) {
+        textContent = textPart.text;
+      }
+      // Not: phi4:14b metin tabanlı olduğu için image_url kısımları burada işlenmiyor.
+      // Eğer model multimodal olsaydı, image_url'ler base64'e çevrilip `images` alanına eklenebilirdi.
+    }
+    return {
+      role: msg.role,
+      content: textContent,
+    };
+  });
 
   const payload = {
     model: OLLAMA_MODEL_ID,
-    messages: messages,
+    messages: ollamaMessages,
     stream: false, // Tek seferlik yanıt almak için stream: false
   };
 
@@ -56,43 +79,22 @@ export async function makeHFAPIRequest(messages: ChatMessage[]): Promise<Formatt
     });
 
     if (!response.ok) {
-      // HTTP hata durumlarını ele al
       const errorBody = await response.text();
       console.error(`Ollama API request failed with status ${response.status}:`, errorBody);
-      throw new Error(`Ollama API request failed: ${response.status} ${response.statusText} - ${errorBody}`);
+      throw new Error(`Ollama API isteği başarısız oldu: ${response.status} ${response.statusText} - ${errorBody}`);
     }
 
     const rawResponse = await response.json();
     console.log("Raw response from Ollama API:", JSON.stringify(rawResponse, null, 2));
 
-    // Ollama /api/chat non-streaming yanıt formatı genellikle şu şekildedir:
-    // {
-    //   "model": "...",
-    //   "created_at": "...",
-    //   "message": {
-    //     "role": "assistant",
-    //     "content": "..."
-    //   },
-    //   "done": true,
-    //   "total_duration": ...,
-    //   "load_duration": ...,
-    //   "prompt_eval_count": ...,
-    //   "prompt_eval_duration": ...,
-    //   "eval_count": ...,
-    //   "eval_duration": ...
-    // }
-    // Bizim için önemli olan `rawResponse.message.content`.
-
     let generatedContent = "";
     if (rawResponse && rawResponse.message && typeof rawResponse.message.content === 'string') {
       generatedContent = rawResponse.message.content;
     } else {
-      console.warn("Ollama response structure was not as expected. Raw response:", rawResponse);
-      // Fallback olarak tüm yanıtı stringify etmeye çalışabiliriz, ancak ideal değil.
-      generatedContent = JSON.stringify(rawResponse);
+      console.warn("Ollama yanıt yapısı beklenildiği gibi değil. Ham yanıt:", rawResponse);
+      generatedContent = "Hata: Ollama'dan beklenmeyen yanıt yapısı.";
     }
 
-    // src/utils/api.ts'nin beklediği formata dönüştür
     return {
       id: 'ollama-req-' + Date.now(), // Benzersiz bir ID oluştur
       choices: [
@@ -101,23 +103,26 @@ export async function makeHFAPIRequest(messages: ChatMessage[]): Promise<Formatt
             role: 'assistant',
             content: generatedContent,
           },
-          finish_reason: rawResponse.done ? 'stop' : 'length', // Ollama 'done' alanı sağlar
+          // Ollama 'done: true' ise 'stop', 'done: false' ise 'length' (veya undefined)
+          finish_reason: rawResponse.done === true ? 'stop' : (rawResponse.done === false ? 'length' : undefined),
         },
       ],
-      created: rawResponse.created_at ? new Date(rawResponse.created_at).getTime() / 1000 : Math.floor(Date.now() / 1000),
+      // 'created_at' varsa saniyeye çevir, yoksa şu anki zamanı kullan
+      created: rawResponse.created_at ? Math.floor(new Date(rawResponse.created_at).getTime() / 1000) : Math.floor(Date.now() / 1000),
       model: rawResponse.model || OLLAMA_MODEL_ID,
       object: 'chat.completion',
     };
 
   } catch (error: any) {
-    console.error('Error during Ollama API request in makeHFAPIRequest:', error);
-    // Network hatası veya fetch ile ilgili diğer hatalar buraya düşebilir
-    throw error; // Hatayı yeniden fırlat
+    console.error('makeHFAPIRequest içinde Ollama API isteği sırasında hata:', error);
+    // Ağ hatası veya fetch ile ilgili diğer hatalar buraya düşebilir
+    throw new Error(`Ollama'dan yanıt alınamadı: ${error.message}`);
   }
 }
 
-// ÖNEMLİ: Bu dosyada artık Hugging Face'e özgü HF_ACCESS_TOKEN, HF_PROVIDERS,
+// ÖNEMLİ: Bu dosya artık yerel Ollama sunucusuyla iletişim kurmak üzere yapılandırılmıştır.
+// Hugging Face Inference API'ye özgü olan HF_ACCESS_TOKEN, HF_PROVIDERS,
 // getCurrentHFProvider, setProviderCooldown gibi yapılara ihtiyaç yoktur ve kaldırılmıştır.
-// makeHFAPIRequest fonksiyonunun adı projenizde daha genel bir anlama geliyorsa
-// (örneğin makeAIRequest) veya özellikle Ollama'ya işaret etmesini istiyorsanız
-// (makeOllamaAPIRequest) değiştirebilirsiniz.
+// `makeHFAPIRequest` fonksiyon adı, `src/utils/api.ts` dosyasındaki çağrıyla uyumlu olması için
+// şimdilik korunmuştur. İsteğe bağlı olarak projenizin yapısına göre yeniden adlandırılabilir
+// (örneğin, `makeOllamaAPIRequest`).
