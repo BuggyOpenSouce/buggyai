@@ -51,41 +51,32 @@ function isProviderOnCooldown(providerId: string): boolean {
 export async function makeHFAPIRequest(messages: any[]) {
   const provider = getCurrentHFProvider();
   
+  // Dynamically import the module
   const HfInferenceModule = await import("@huggingface/inference");
   
-  let ClientConstructor;
+  // Access the constructor using the name revealed by your console log: HfInference
+  const ClientConstructor = HfInferenceModule.HfInference;
 
-  // Attempt to access InferenceClient as a named export
-  if (HfInferenceModule && typeof HfInferenceModule.InferenceClient === 'function') {
-    ClientConstructor = HfInferenceModule.InferenceClient;
-  } 
-  // If not found as a named export, try checking if the default export is the constructor
-  // or if default is an object containing InferenceClient (less common for classes, but possible)
-  else if (HfInferenceModule && HfInferenceModule.default) {
-    if (typeof HfInferenceModule.default === 'function') {
-      // Check if the default export itself is the constructor
-      ClientConstructor = HfInferenceModule.default;
-    } else if (typeof HfInferenceModule.default.InferenceClient === 'function') {
-      // Check if default is an object that has InferenceClient as a property
-      ClientConstructor = HfInferenceModule.default.InferenceClient;
-    }
-  }
-
-  // If ClientConstructor is still not found or not a function, throw an error
+  // Verify that ClientConstructor is indeed a function before trying to instantiate it
   if (typeof ClientConstructor !== 'function') {
-    console.error("Could not find or resolve InferenceClient constructor from @huggingface/inference.", HfInferenceModule);
-    throw new TypeError("InferenceClient is not a constructor. Module structure might be unexpected.");
+    console.error(
+      "Failed to correctly access the HfInference constructor. Actual imported module:", 
+      HfInferenceModule
+    );
+    throw new TypeError(
+      "The resolved HfInference class is not a constructor. Check module exports."
+    );
   }
 
   const client = new ClientConstructor(provider.key);
 
   try {
-    const chatCompletion = await client.chatCompletion({
+    const chatCompletionResult = await client.chatCompletion({
       model: provider.model,
       messages: messages
     });
 
-    return chatCompletion;
+    return chatCompletionResult;
   } catch (error) {
     console.error('HuggingFace API Error:', error);
     throw error;
