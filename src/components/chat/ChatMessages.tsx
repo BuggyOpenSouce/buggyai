@@ -220,7 +220,7 @@ export function ChatMessages({ messages, onRegenerate, onExplain, isLoading }: C
                   <MessageSquare className="w-5 h-5 text-indigo-400 animate-pulse" />
                   <div className="space-x-1">
                     <span className="w-2 h-2 bg-indigo-400 rounded-full inline-block animate-bounce" style={{ animationDelay: '0s' }} />
-                    <span className="w-2 h-2 bg-indigo-400 rounded-full inline-block animate-bounce" style={{ animationDelay: '0.1s'a }} />
+                    <span className="w-2 h-2 bg-indigo-400 rounded-full inline-block animate-bounce" style={{ animationDelay: '0.1s' }} />
                     <span className="w-2 h-2 bg-indigo-400 rounded-full inline-block animate-bounce" style={{ animationDelay: '0.2s' }} />
                   </div>
                 </div>
