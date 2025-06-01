@@ -196,8 +196,8 @@ export async function makeGeminiAPIRequest(
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`Gemini API Hatası (${response.status}):`, errorBody);
-      let userFriendlyError = `Gemini API isteği ${response.status} durumuyla başarısız oldu.`;
+      console.error(`Buggy API Hatası (${response.status}):`, errorBody);
+      let userFriendlyError = `Buggy API isteği ${response.status} durumuyla başarısız oldu.`;
       try {
         const parsedError = JSON.parse(errorBody);
         if (parsedError.error && parsedError.error.message) {
