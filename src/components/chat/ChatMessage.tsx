@@ -1,113 +1,143 @@
-// src/components/chat/ChatMessages.tsx
-import React, { useEffect, useRef, useMemo } from 'react';
-import type { Message, UserProfile } from '../../types'; // Message tipini import et
-import ChatMessage from './ChatMessage'; // ChatMessage componentını import et
-import LoadingIndicator from '../LoadingIndicator'; // Yükleme göstergesi
+// src/components/chat/ChatMessage.tsx
+import React from 'react';
+import type { Message } from '../../types'; // Message tipini import et
+import Markdown from 'react-markdown'; // Markdown render için
+import rehypeKatex from 'rehype-katex';
+import remarkMath from 'remark-math';
+import remarkGfm from 'remark-gfm';
+// ... (diğer importlar: ContextMenu, ikonlar vb.)
 
-interface ChatMessagesProps {
-  messages: Message[];
-  currentUserId: string | null;
-  isLoading?: boolean; // Yeni mesaj yüklenirken gösterilecek yükleme durumu
-  userProfile?: UserProfile | null; // Yapay zeka avatarı için
-  onResendMessage?: (messageId: string) => void;
-  onDeleteMessage?: (messageId: string) => void;
-  onCopyMessage?: (content: string) => void;
-  onEditMessage?: (messageId: string, newContent: string) => void; // Düzenleme için
-  onFeedback?: (messageId: string, feedback: 'good' | 'bad') => void;
+// ChatMessageProps arayüzünü güncelleyerek originalMessageId ve isContinuation ekleyelim
+export interface ChatMessageProps {
+  key?: string | number; // React key'i
+  message: Partial<Message> & { content: string; originalMessageId?: string; }; // content zorunlu, originalMessageId eklendi
+  isOwnMessage: boolean;
+  isContinuation?: boolean; // Bu mesaj bir öncekinin devamı mı?
+  assistantAvatarUrl?: string | null;
+  userAvatarUrl?: string | null;
+  onResend?: () => void;
+  onDelete?: () => void;
+  onCopy?: () => void;
+  onEdit?: (newContent: string) => void;
+  onFeedback?: (feedback: 'good' | 'bad') => void;
+  // ... (diğer proplar)
 }
 
-const ChatMessages: React.FC<ChatMessagesProps> = ({
-  messages,
-  currentUserId,
-  isLoading,
-  userProfile,
-  onResendMessage,
-  onDeleteMessage,
-  onCopyMessage,
-  onEditMessage,
+const ChatMessage: React.FC<ChatMessageProps> = ({
+  message,
+  isOwnMessage,
+  isContinuation, // Yeni prop
+  assistantAvatarUrl,
+  userAvatarUrl,
+  onResend,
+  onDelete,
+  onCopy,
+  onEdit,
   onFeedback,
 }) => {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { role, content, timestamp, images, videos, isLoading, isError, feedback } = message;
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const avatarUrl = role === 'assistant' ? assistantAvatarUrl : userAvatarUrl;
+  const showAvatar = !isOwnMessage && !isContinuation && avatarUrl; // Kendi mesajın değilse, devam mesajı değilse ve avatar varsa göster
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading]);
-
-  // Mesajları işleyerek, yapay zeka mesajlarını paragraflara böl
-  const processedMessages = useMemo(() => {
-    return messages.flatMap((message, msgIndex) => {
-      if (message.role === 'assistant' && message.content) {
-        // İçeriği bir veya daha fazla boş satıra göre böl (örn: \n\n, \n \n, vb.)
-        const parts = message.content.split(/\n\s*\n/).filter(part => part.trim() !== '');
-
-        if (parts.length > 1) {
-          return parts.map((part, partIndex) => ({
-            ...message, // Orijinal mesajın özelliklerini kopyala
-            id: `${message.id}-part-${partIndex}`, // Her parça için benzersiz bir key/id oluştur
-            originalMessageId: message.id, // Orijinal mesaj ID'sini sakla (geri bildirim vb. için)
-            content: part.trim(), // Parçanın içeriği
-            isContinuation: partIndex > 0, // İlk parçadan sonraki parçalar devam niteliğinde
-            // Eğer her mesaj balonu için resim/video göstermek istemiyorsanız, bunları sadece ilk parçada tutabilirsiniz:
-            images: partIndex === 0 ? message.images : undefined,
-            videos: partIndex === 0 ? message.videos : undefined,
-          }));
-        }
-      }
-      // Eğer mesaj kullanıcıya aitse, sistem mesajıysa veya bölünemiyorsa olduğu gibi döndür
-      return { ...message, originalMessageId: message.id, isContinuation: false };
-    });
-  }, [messages]);
+  // Zaman damgasını formatla
+  const formattedTime = timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
 
   return (
-    <div className="chat-messages-container flex-1 overflow-y-auto p-4 space-y-2 bg-transparent">
-      {processedMessages.map((msg) => (
-        <ChatMessage
-          key={msg.id} // Benzersiz key olarak güncellenmiş id'yi kullan
-          message={{
-            id: msg.id, // Parçanın ID'si
-            originalMessageId: msg.originalMessageId, // Orijinal ID
-            role: msg.role,
-            content: msg.content,
-            timestamp: msg.timestamp,
-            images: msg.images,
-            videos: msg.videos,
-            isLoading: msg.isLoading,
-            isError: msg.isError,
-            feedback: msg.feedback,
-            // Diğer gerekli Message alanları...
-          }}
-          isOwnMessage={msg.role === 'user' && msg.id.startsWith(currentUserId || 'guest')} // Kullanıcı mesajı mı? ID kontrolü gerekebilir.
-          // currentUserId null ise veya guest ise ve mesaj user ise kendi mesajı olarak işaretle.
-          // Parçalanmış mesajlar için user rolü olmayacak, bu yüzden bu kontrol assistant için hep false olacak.
-          // isOwnMessage={msg.role === 'user'} daha basit olabilir eğer msg.id'ler farklılaşıyorsa
-          // veya msg.userId gibi bir alanınız varsa.
-          // Şimdilik, rol üzerinden devam edelim.
-          // Yapay zeka avatarını userProfile'dan alabilirsiniz.
-          // Eğer `isContinuation` prop'u ekliyorsanız:
-          isContinuation={msg.isContinuation}
-          // ChatMessage'a iletmek istediğiniz diğer proplar
-          onResend={() => onResendMessage && msg.originalMessageId && onResendMessage(msg.originalMessageId)}
-          onDelete={() => onDeleteMessage && msg.originalMessageId && onDeleteMessage(msg.originalMessageId)}
-          onCopy={() => onCopyMessage && onCopyMessage(msg.content)}
-          onEdit={(newContent) => onEditMessage && msg.originalMessageId && onEditMessage(msg.originalMessageId, newContent)} // Düzenleme tüm mesajı etkilemeli
-          onFeedback={(feedback) => onFeedback && msg.originalMessageId && onFeedback(msg.originalMessageId, feedback)}
-          // Avatar için:
-          // assistantAvatarUrl={msg.role === 'assistant' ? userProfile?.avatar_url : undefined}
-          // userAvatarUrl={msg.role === 'user' ? (mevcut kullanıcının avatarı) : undefined}
+    <div
+      className={`chat-message-wrapper flex ${isOwnMessage ? 'justify-end' : 'justify-start'} ${isContinuation && !isOwnMessage ? 'ml-10' : ''} ${isContinuation && isOwnMessage ? 'mr-10' : ''}`}
+      // Devam mesajları için sola/sağa padding eklenebilir veya avatar gizlenebilir.
+      // Yukarıdaki ml-10/mr-10 avatar genişliği kadar bir boşluk varsayar.
+    >
+      {/* Avatar: Sadece kendi mesajın değilse ve devam mesajı değilse göster */}
+      {!isOwnMessage && !isContinuation && (
+        <img
+          src={avatarUrl || '/default-avatar.png'} // Varsayılan avatar
+          alt={role === 'assistant' ? 'AI Avatar' : 'User Avatar'}
+          className="w-8 h-8 rounded-full mr-2 self-end mb-1" // Avatar stili
         />
-      ))}
-      {isLoading && (
-        <div className="flex justify-center py-2">
-          <LoadingIndicator />
-        </div>
       )}
-      <div ref={messagesEndRef} />
+
+      <div
+        className={`message-bubble max-w-xs md:max-w-md lg:max-w-lg xl:max-w-2xl p-3 rounded-lg shadow-md ${
+          isOwnMessage
+            ? 'bg-blue-500 text-white rounded-br-none'
+            // ? 'bg-gradient-to-br from-sky-500 to-indigo-600 text-white rounded-br-none'
+            : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-none'
+        } ${isError ? 'border border-red-500' : ''}`}
+      >
+        {/* Mesaj içeriği, resimler, videolar vb. */}
+        <div className="prose prose-sm dark:prose-invert max-w-none break-words">
+          <Markdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+            // eslint-disable-next-line react/no-children-prop
+            children={content} // content prop'u burada
+            components={{
+              // Markdown component'lerini özelleştirebilirsiniz (örn: kod blokları)
+              code({ node, inline, className, children, ...props }) {
+                const match = /language-(\w+)/.exec(className || '');
+                // ... (mevcut kod bloğu render etme mantığınız)
+                return !inline && match ? (
+                  <pre className="bg-gray-800 text-white p-2 rounded my-2 overflow-x-auto">
+                    <code {...props} className={className}>
+                      {String(children).replace(/\n$/, '')}
+                    </code>
+                  </pre>
+                ) : (
+                  <code {...props} className={className}>
+                    {children}
+                  </code>
+                );
+              },
+              // Diğer özel componentler (resim, video vb. için gerekirse)
+            }}
+          />
+        </div>
+
+        {/* Resimler (sadece ilk parçada gösteriliyorsa ChatMessages'ta ayarlandı) */}
+        {images && images.length > 0 && (
+          <div className={`mt-2 grid gap-2 ${images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {images.map((imgBase64, index) => (
+              <img key={index} src={imgBase64} alt={`Uploaded content ${index + 1}`} className="rounded-lg max-w-full h-auto" />
+            ))}
+          </div>
+        )}
+
+        {/* Videolar (sadece ilk parçada gösteriliyorsa ChatMessages'ta ayarlandı) */}
+        {videos && videos.length > 0 && (
+          <div className="mt-2 space-y-2">
+            {videos.map((videoDataUri, index) => (
+              <video key={index} controls src={videoDataUri} className="rounded-lg max-w-full h-auto" />
+            ))}
+          </div>
+        )}
+        
+        {/* Zaman damgası ve diğer ikonlar/aksiyonlar */}
+        <div className="text-xs mt-1 text-right opacity-75">
+          {formattedTime}
+          {/* Geri bildirim, düzenleme, silme ikonları buraya gelebilir */}
+        </div>
+
+        {isError && onResend && (
+            <button onClick={onResend} className="text-xs text-red-500 hover:underline mt-1">
+                Tekrar Gönder
+            </button>
+        )}
+      </div>
+
+      {/* Avatar: Kendi mesajın ise ve devam mesajı değilse göster (sağda) */}
+      {isOwnMessage && !isContinuation && (
+        <img
+          src={userAvatarUrl || '/default-user-avatar.png'} // Varsayılan kullanıcı avatarı
+          alt="My Avatar"
+          className="w-8 h-8 rounded-full ml-2 self-end mb-1" // Avatar stili
+        />
+      )}
+       {/* Context Menu (sağ tık menüsü) */}
+       {/* <ContextMenu message={message} onCopy={onCopy} onDelete={onDelete} onEdit={onEdit} onFeedback={onFeedback} /> */}
     </div>
   );
 };
 
-export default ChatMessages;
+export default ChatMessage;
