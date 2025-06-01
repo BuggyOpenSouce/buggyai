@@ -37,4 +37,4 @@ const handleDownloadPDF = async () => {
   } catch (error) {
     console.error('Error generating PDF:', error);
   }
-};a
+};
