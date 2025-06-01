@@ -26,7 +26,7 @@ export default defineConfig({
     })
   ],
   optimizeDeps: {
-    exclude: ['lucide-react'],
+    exclude: ['lucide-react', '@huggingface/inference'], // Added @huggingface/inference
   },
   build: {
     target: 'esnext',
