@@ -1,5 +1,5 @@
 // project/src/confighuggingtext.ts
-// import { InferenceClient } from "@huggingface/inference"; // Static import was previously removed
+import { InferenceClient } from "@huggingface/inference"; // Reverted to static import
 
 export const HF_ACCESS_TOKEN = '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';
 
@@ -28,9 +28,6 @@ export function getCurrentHFProvider() {
 
   if (currentProviderIndex >= HF_PROVIDERS.length) {
     currentProviderIndex = 0;
-    // It might be better to throw an error or handle the case where all providers are on cooldown,
-    // but for now, it resets to 0. The original code did this.
-    // Consider if throwing an error here is more appropriate for your application's logic.
     if (isProviderOnCooldown(HF_PROVIDERS[currentProviderIndex].id)) {
         throw new Error('All HuggingFace providers are currently on cooldown. Please try again in a few minutes.');
     }
@@ -54,14 +51,13 @@ function isProviderOnCooldown(providerId: string): boolean {
 
 export async function makeHFAPIRequest(messages: any[]) {
   const provider = getCurrentHFProvider();
-
-  // Dynamically import InferenceClient
-  const { InferenceClient } = await import("@huggingface/inference");
+  
+  // InferenceClient is now from static import
   const client = new InferenceClient(provider.key);
 
   try {
     const chatCompletion = await client.chatCompletion({
-      // provider: "hf-inference", // Removed this line as it's not a standard parameter for client.chatCompletion
+      // provider: "hf-inference", // This line remains removed
       model: provider.model,
       messages: messages
     });
@@ -69,9 +65,6 @@ export async function makeHFAPIRequest(messages: any[]) {
     return chatCompletion;
   } catch (error) {
     console.error('HuggingFace API Error:', error);
-    // Optional: If the error is due to the provider being busy or a specific type of error,
-    // you might want to set it on cooldown here.
-    // Example: if (error.message.includes("Model is overloaded")) { setProviderCooldown(provider.id); }
     throw error;
   }
 }
