@@ -78,8 +78,8 @@ export async function makeGeminiAPIRequest(
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
   const localAISettings = aiSettings || JSON.parse(localStorage.getItem('aiSettings') || '{}');
-  const maxTokens = localAISettings.maxTokens || 2048;
-  const temperature = localAISettings.temperature || 0.7;
+  const maxTokens = localAISettings.maxTokens || 4096;
+  const temperature = localAISettings.temperature || 0.9;
   const importantPoints = localAISettings.importantPoints || [];
   const discussedTopicsFromSettings = localAISettings.discussedTopics || [];
 
