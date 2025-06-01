@@ -45,8 +45,8 @@
     "@types/react-virtualized": "^9.21.29",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.18",
-    "electron": "^36.3.2",  // Güncellendi
-    "electron-builder": "^24.13.3", // Güncellendi (Electron 36.x ile uyumlu bir sürüm)
+    "electron": "^36.3.2",
+    "electron-builder": "^24.13.3",
     "eslint": "^9.9.1",
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.11",
