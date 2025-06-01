@@ -1,11 +1,7 @@
 // project/src/confighuggingtext.ts
 
-// Static import `import { InferenceClient } ...` caused a build error.
-// We will use dynamic import and the 'HfInference' class name identified previously.
-
 export const HF_ACCESS_TOKEN = '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';
-
-// Model ID from your new example
+// Model ID from your new example, which seems to be found by the API (no 404)
 const HF_MODEL_ID = "Qwen/Qwen3-235B-A22B";
 
 interface ChatMessage {
@@ -13,48 +9,132 @@ interface ChatMessage {
   content: string;
 }
 
-export async function makeHFAPIRequest(messages: ChatMessage[]) {
+// Define an interface for the expected output structure for better type safety
+// This is what src/utils/api.ts will consume.
+interface FormattedChatCompletionOutput {
+  id: string;
+  choices: Array<{
+    message: {
+      role: 'assistant';
+      content: string;
+    };
+    finish_reason?: string;
+    index?: number;
+  }>;
+  created?: number;
+  model?: string;
+  object?: string;
+}
+
+export async function makeHFAPIRequest(messages: ChatMessage[]): Promise<FormattedChatCompletionOutput> {
   if (!HF_ACCESS_TOKEN) {
     console.error("HuggingFace Access Token is not set in src/confighuggingtext.ts");
     throw new Error("HuggingFace Access Token is not configured.");
   }
 
-  // Use dynamic import to load the module
   const HfInferenceModule = await import("@huggingface/inference");
-
-  // Access the constructor using the HfInference name, which we found previously
+  // Ensure we are using HfInference as the constructor name
   const ClientConstructor = HfInferenceModule.HfInference;
 
   if (typeof ClientConstructor !== 'function') {
     console.error(
-      "Failed to correctly access the HfInference constructor from @huggingface/inference. Actual imported module content:", 
+      "Failed to correctly access the HfInference constructor from @huggingface/inference. Module content:", 
       HfInferenceModule
     );
     throw new TypeError(
-      "The resolved HfInference class is not a constructor. Please check module exports and previous logs."
+      "The resolved HfInference class is not a constructor. Please check module exports."
     );
   }
 
   const client = new ClientConstructor(HF_ACCESS_TOKEN);
 
   try {
+    const payload = {
+      model: HF_MODEL_ID,
+      messages: messages,
+      // Consider adding 'options: { use_cache: false }' if you need to ensure the latest response
+      // or 'stream: false' if the endpoint might default to streaming and you're not handling it.
+    };
     console.log(
-      `Making HuggingFace API request to model: ${HF_MODEL_ID} with messages:`,
-      JSON.stringify(messages, null, 2)
+      `Using HfInference.request with model: ${HF_MODEL_ID}, payload:`,
+      JSON.stringify(payload, null, 2)
     );
 
-    const chatCompletion = await client.chatCompletion({
-      provider: "hf-inference", // As per your example
-      model: HF_MODEL_ID,       // Using model from your example
-      messages: messages,
-    });
+    // Switch to client.request as per the error message's advice
+    const rawResponse = await client.request(payload);
 
-    console.log("Received chat completion from HuggingFace:", JSON.stringify(chatCompletion, null, 2));
-    return chatCompletion;
+    // CRITICAL LOG: This will show the actual structure of the response from the Qwen model
+    console.log("Raw response from HfInference.request:", JSON.stringify(rawResponse, null, 2));
+
+    // --- IMPORTANT: Adjust parsing logic below based on the logged rawResponse ---
+    let generatedContent = "";
+    const responseObject = rawResponse as any; // Use type assertion for easier access
+
+    if (typeof responseObject === 'object' && responseObject !== null) {
+      if (Array.isArray(responseObject)) {
+        // Case: Response is an array (e.g., some text-generation models return [{ "generated_text": "..." }])
+        if (responseObject.length > 0 && responseObject[0]) {
+          const firstItem = responseObject[0];
+          if (typeof firstItem.generated_text === 'string') {
+            generatedContent = firstItem.generated_text;
+          } else if (firstItem.message && typeof firstItem.message.content === 'string') { // OpenAI-like choice in array
+            generatedContent = firstItem.message.content;
+          }
+        }
+      } else {
+        // Case: Response is an object
+        if (typeof responseObject.generated_text === 'string') { // Common for text generation
+          generatedContent = responseObject.generated_text;
+        } else if (responseObject.choices && Array.isArray(responseObject.choices) && responseObject.choices.length > 0) {
+          // OpenAI-like structure
+          const firstChoice = responseObject.choices[0];
+          if (firstChoice.message && typeof firstChoice.message.content === 'string') {
+            generatedContent = firstChoice.message.content;
+          } else if (typeof firstChoice.text === 'string') { // Some models use 'text' in choice
+            generatedContent = firstChoice.text;
+          }
+        } else if (responseObject.output && typeof responseObject.output.text === 'string') {
+          // Some models (like certain Qwen versions via direct API) use { "output": { "text": "..." } }
+          generatedContent = responseObject.output.text;
+        } else if (typeof responseObject.response === 'string') {
+          // Some models might return { "response": "..." }
+          generatedContent = responseObject.response;
+        } else if (typeof responseObject.text === 'string') { // Simpler { "text": "..." }
+            generatedContent = responseObject.text;
+        }
+        // Add more specific parsing rules here if the Qwen model has a unique structure.
+      }
+    }
+
+    // Fallback if no specific content was extracted
+    if (!generatedContent && rawResponse) {
+      if (typeof rawResponse === 'string') {
+        generatedContent = rawResponse; // If the whole response is just a string
+      } else {
+        console.warn("Could not specifically parse meaningful content from rawResponse. Stringifying the response as a fallback.");
+        generatedContent = JSON.stringify(rawResponse);
+      _}
+    }
+    // --- End of parsing logic ---
+
+    // Reconstruct an object that src/utils/api.ts expects
+    return {
+      id: 'hf-req-' + Date.now(),
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: generatedContent,
+          },
+          finish_reason: 'stop', // Placeholder, adjust if model provides this
+        },
+      ],
+      model: HF_MODEL_ID,
+      object: 'chat.completion', // Mimic standard chat completion object type
+    };
 
   } catch (error: any) {
-    console.error('HuggingFace API Error in makeHFAPIRequest:', error);
-    
+    console.error('HuggingFace API Error in makeHFAPIRequest (using client.request):', error);
     console.error('Error Name:', error.name);
     console.error('Error Message:', error.message);
     if (error.stack) {
@@ -77,7 +157,6 @@ export async function makeHFAPIRequest(messages: ChatMessage[]) {
     } else if (typeof error.status === 'number') {
         console.error('Error Status (from error object directly):', error.status);
     }
-    
     throw error;
   }
 }
