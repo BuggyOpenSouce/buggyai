@@ -1,234 +1,121 @@
-// project/src/components/chat/ChatMessages.tsx
-import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { MessageSquare, RefreshCw, Info, Copy, Download } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import rehypeRaw from 'rehype-raw';
-import 'katex/dist/katex.min.css';
+import React, { useEffect, useRef, useMemo, memo } from 'react';
 import type { Message } from '../../types';
+import ChatMessage from './ChatMessage';
+import LoadingIndicator from '../LoadingIndicator'; // Yükleme göstergesi için import
+import { useUserProfile } from '../../buggyprofile/hooks/useUserProfile'; // Profil hook'u eklendi
 
 interface ChatMessagesProps {
   messages: Message[];
-  onRegenerate: (index: number) => void;
-  onExplain: (index: number) => void;
-  isLoading: boolean;
+  isLoading: boolean; // Ana yükleme durumu
+  currentConversationId: string | null;
+  onResendMessage?: (message: Message) => void;
+  onDeleteMessage?: (messageId: string, conversationId: string | null) => void;
+  onEditMessage?: (messageId: string, newContent: string, conversationId: string | null) => void;
+  onFeedback?: (messageId: string, feedback: 'good' | 'bad', conversationId: string | null) => void;
+  selectedModelConfigKey?: string;
 }
 
-export function ChatMessages({ messages, onRegenerate, onExplain, isLoading }: ChatMessagesProps) {
-  const handleCopyCode = (code: string) => {
-    navigator.clipboard.writeText(code).then(() => {
-      // console.log('Kod kopyalandı!'); // İsteğe bağlı bildirim
-    }).catch(err => {
-      console.error('Kod kopyalanamadı:', err);
+const ChatMessages: React.FC<ChatMessagesProps> = ({
+  messages,
+  isLoading,
+  currentConversationId,
+  onResendMessage,
+  onDeleteMessage,
+  onEditMessage,
+  onFeedback,
+  selectedModelConfigKey,
+}) => {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { userProfile } = useUserProfile(); // Kullanıcı profilini al
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isLoading]); // isLoading değiştiğinde de scroll yap
+
+  const processedMessages = useMemo(() => {
+    return messages.flatMap((message, index) => {
+      const contentToProcess = message.content || "";
+      // Asistan mesajlarını her bir '\n' karakterine göre böl.
+      // Kullanıcı mesajları için bu davranış istenmiyorsa, koşulu (message.role === 'assistant') ekleyebiliriz.
+      // Şimdiki istek asistan mesajları için olduğundan ona odaklanıyoruz.
+      const parts = message.role === 'assistant'
+        ? contentToProcess.split(/\n/).filter(part => part.trim() !== '' || contentToProcess.trim() === '') // Boş satırları filtrele, ama mesaj tamamen boşsa tek bir boş baloncuk kalsın
+        : [contentToProcess]; // Kullanıcı mesajlarını bölme
+
+      if (message.role === 'assistant' && parts.length > 1) {
+        return parts.map((part, partIndex) => ({
+          ...message,
+          id: `${message.id}-part-${partIndex}`, // Her parça için benzersiz ID
+          originalMessageId: message.id, // Orijinal mesaj ID'sini sakla
+          content: part.trim(),
+          isContinuation: partIndex > 0, // İlk parçadan sonrakiler devamı niteliğinde
+          // Resim ve videoları sadece ilk baloncukta göster
+          images: partIndex === 0 ? message.images : undefined,
+          videos: partIndex === 0 ? message.videos : undefined,
+          // Yükleme ve hata durumunu ana mesajla senkronize et
+          // Ancak genellikle parçalanmış mesajlar zaten tamamlanmış olur.
+          // Eğer stream ediliyorsa ve parçalar halinde geliyorsa bu mantık değişebilir.
+          isLoading: message.isLoading && index === messages.length -1 && partIndex === parts.length -1, // Sadece son mesajın son parçası yükleniyor olabilir
+        }));
+      }
+      // Eğer mesaj bölünemiyorsa veya kullanıcı mesajıysa
+      return { ...message, originalMessageId: message.id, isContinuation: false, isLoading: message.isLoading && index === messages.length - 1 };
     });
-  };
-
-  const handleDownloadCode = (code: string, filenameFromAI: string | undefined) => {
-    let filename = filenameFromAI || 'kod_parcasi.txt';
-    // Dosya uzantısı yoksa veya tanımsızsa varsayılan .txt ekle
-    if (!filename.includes('.')) {
-        filename += '.txt';
-    }
-
-    const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const renderMessageContent = (message: Message, index: number) => {
-    return (
-      <div className="message-content-wrapper">
-        {message.images && message.images.length > 0 && (
-          <div className="my-2 flex flex-wrap gap-2">
-            {message.images.map((imgSrc, i) => (
-              <motion.img
-                key={`${index}-img-${i}`}
-                src={imgSrc}
-                alt={`Kullanıcı tarafından yüklenen resim ${i + 1}`}
-                className="max-w-[200px] sm:max-w-[250px] h-auto rounded-lg border border-gray-200 dark:border-gray-700"
-                loading="lazy"
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.3 }}
-              />
-            ))}
-          </div>
-        )}
-        {message.content && (
-          <div className="text-base leading-relaxed whitespace-pre-wrap">
-            <ReactMarkdown
-              remarkPlugins={[remarkMath]}
-              rehypePlugins={[rehypeKatex, rehypeRaw]}
-              components={{
-                pre: ({ children, ...props }) => {
-                  // `children` genellikle tek bir `<code>` elementi içerir.
-                  if (React.Children.count(children) === 1) {
-                    const codeElement = React.Children.toArray(children)[0] as React.ReactElement;
-                    if (codeElement.type === 'code' && codeElement.props) {
-                      const { className, children: codeContentNode } = codeElement.props;
-                      const language = (className || '').replace('language-', '');
-                      
-                      let codeString = '';
-                      if (typeof codeContentNode === 'string') {
-                        codeString = codeContentNode;
-                      } else if (Array.isArray(codeContentNode)) {
-                        codeString = codeContentNode.map(String).join('');
-                      }
-                      
-                      codeString = codeString.trim();
-                      let filenameFromAI: string | undefined = undefined;
-                      let actualCode = codeString;
-
-                      const firstLine = codeString.split('\n')[0];
-                      const filenameMatch = firstLine.match(/^(?:#|\/\/) filename:\s*(.+)$/);
-                      if (filenameMatch && filenameMatch[1]) {
-                        filenameFromAI = filenameMatch[1].trim();
-                        actualCode = codeString.substring(codeString.indexOf('\n') + 1).trimStart();
-                      }
-
-                      return (
-                        <div className="code-block-container group">
-                          <div className="code-block-header">
-                            <span className="code-language">{language || 'kod'}</span>
-                            <div className="code-actions">
-                              <button
-                                onClick={() => handleCopyCode(actualCode)}
-                                className="code-action-button"
-                                title="Kodu Kopyala"
-                              >
-                                <Copy size={16} />
-                              </button>
-                              <button
-                                onClick={() => handleDownloadCode(actualCode, filenameFromAI)}
-                                className="code-action-button"
-                                title={`"${filenameFromAI || (language ? `snippet.${language}` : 'snippet.txt')}" olarak indir`}
-                              >
-                                <Download size={16} />
-                              </button>
-                            </div>
-                          </div>
-                          {/* Orijinal `pre` özelliklerini (props) buraya aktarıyoruz, ama stili CSS ile yöneteceğiz */}
-                          <pre {...props}> 
-                            <code>{actualCode}</code>
-                          </pre>
-                        </div>
-                      );
-                    }
-                  }
-                  // Varsayılan `pre` render'ı (başka bir durum için)
-                  return <pre {...props} className="default-markdown-pre">{children}</pre>;
-                },
-                // Inline code için stil
-                code({ node, className, children, ...props }) {
-                    // Eğer pre elementi içinde değilsek (yani inline kod ise)
-                    // pre elementi içindeki kodlar zaten yukarıdaki pre render'ı ile hallediliyor.
-                    // Bu kontrol, `pre > code` için özel stillerin inline `code`'u etkilememesini sağlar.
-                    const isInsidePre = node?.parent?.type === 'element' && node.parent.tagName === 'pre';
-                    if (isInsidePre) {
-                         // pre render'ı zaten içindeki code için kendi formatlamasını yapıyor.
-                         // Bu yüzden burada sadece children'ı döndürmek yeterli olabilir
-                         // ya da ReactMarkdown'ın kendi code render'ına bırakılabilir.
-                         // Ancak custom pre render'ımız kendi <code> etiketini oluşturduğu için
-                         // ReactMarkdown'ın bu code component'ini pre içinde çağırmaması beklenir.
-                         // Güvenlik için, eğer bir şekilde çağrılırsa, basitçe içeriği döndür.
-                        return <code {...props} className={className}>{children}</code>;
-                    }
-                    return (
-                        <code {...props} className={`inline-code ${className || ''}`}>
-                        {children}
-                        </code>
-                    );
-                }
-              }}
-            >
-              {message.content}
-            </ReactMarkdown>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  if (!messages || messages.length === 0) {
-    return (
-        <div className="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400">
-            <MessageSquare size={48} className="mb-4" />
-            <p className="text-lg">Henüz mesaj yok.</p>
-            <p className="text-sm">Bir mesaj yazarak sohbete başlayın.</p>
-        </div>
-    );
-  }
+  }, [messages]);
 
   return (
-    <div className="h-full overflow-y-auto custom-scrollbar">
-      <div className="max-w-3xl mx-auto p-4 space-y-4">
-        <AnimatePresence initial={false}>
-          {messages.map((message, index) => (
-            <motion.div
-              key={`${message.timestamp}-${index}-${message.role}`}
-              layout
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20, transition: { duration: 0.2 } }}
-              transition={{ type: "spring", stiffness: 260, damping: 20 }}
-              className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}
-            >
-              <div className={`message-bubble group relative ${message.role === 'user' ? 'user' : 'assistant'}`}>
-                {renderMessageContent(message, index)}
-                {message.role === 'assistant' && !isLoading && index === messages.length -1 && (
-                  <div className="message-actions absolute -bottom-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                    <button
-                      onClick={() => onRegenerate(index)}
-                      className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-                      title="Yeniden Oluştur"
-                    >
-                      <RefreshCw size={14} />
-                    </button>
-                    <button
-                      onClick={() => onExplain(index)}
-                      className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-                      title="Açıkla"
-                    >
-                      <Info size={14} />
-                    </button>
-                  </div>
-                )}
-              </div>
-               <span className="text-xs text-gray-400 dark:text-gray-500 px-2 mt-1">
-                {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            </motion.div>
-          ))}
-          
-          {isLoading && messages.length > 0 && messages[messages.length -1]?.role === 'user' && (
-            <motion.div
-              key="loading-indicator"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex justify-start"
-            >
-              <div className="message-bubble assistant">
-                <div className="flex items-center gap-3">
-                  <MessageSquare className="w-5 h-5 text-indigo-400 animate-pulse" />
-                  <div className="space-x-1">
-                    <span className="w-2 h-2 bg-indigo-400 rounded-full inline-block animate-bounce" style={{ animationDelay: '0s' }} />
-                    <span className="w-2 h-2 bg-indigo-400 rounded-full inline-block animate-bounce" style={{ animationDelay: '0.1s' }} />
-                    <span className="w-2 h-2 bg-indigo-400 rounded-full inline-block animate-bounce" style={{ animationDelay: '0.2s' }} />
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+    <div className="chat-messages-container flex-1 overflow-y-auto p-4 space-y-2 bg-transparent">
+      {processedMessages.map((msg, idx) => (
+        <ChatMessage
+          key={msg.id} // Benzersiz anahtar olarak msg.id kullanılıyor
+          message={{
+            id: msg.id,
+            role: msg.role,
+            content: msg.content,
+            timestamp: msg.timestamp,
+            images: msg.images,
+            videos: msg.videos,
+            isLoading: msg.isLoading, // msg objesinden gelen isLoading
+            isError: msg.isError,
+            feedback: msg.feedback,
+            originalMessageId: msg.originalMessageId,
+          }}
+          isOwnMessage={msg.role === 'user'}
+          isContinuation={msg.isContinuation}
+          assistantAvatarUrl={selectedModelConfigKey === 'QuestionGeneration' ? '/assets/icons/sparkle-dynamic-color.png' : userProfile?.assistantAvatarUrl || '/default-ai-avatar.png'}
+          userAvatarUrl={userProfile?.avatarUrl || '/default-user-avatar.png'}
+          onResend={onResendMessage && msg.isError ? () => onResendMessage(msg as Message) : undefined}
+          onDelete={onDeleteMessage && currentConversationId ? () => onDeleteMessage(msg.originalMessageId || msg.id, currentConversationId) : undefined}
+          onEdit={onEditMessage && currentConversationId && msg.role === 'user' ? (newContent: string) => onEditMessage(msg.originalMessageId || msg.id, newContent, currentConversationId) : undefined}
+          onFeedback={onFeedback && currentConversationId && msg.role === 'assistant' ? (feedback: 'good' | 'bad') => onFeedback(msg.originalMessageId || msg.id, feedback, currentConversationId) : undefined}
+        />
+      ))}
+      {isLoading && messages.length === 0 && ( // Sadece ilk yüklemede veya mesaj yokken genel yükleme göstergesi
+        <div className="flex justify-center items-center p-4">
+          <LoadingIndicator />
+          <p className="ml-2 text-gray-500 dark:text-gray-400">Mesajlar yükleniyor...</p>
+        </div>
+      )}
+      {isLoading && messages.length > 0 && !messages[messages.length - 1].isLoading && (
+         // Stream bitmiş ama ana isLoading hala true ise (örn. yeni mesaj bekleniyor)
+         // veya bir işlem sonrası genel yükleme durumu varsa diye ek bir kontrol.
+         // Bu genellikle ChatWindow'daki isLoading state'i ile yönetilir.
+         // Eğer son mesajın kendi isLoading'i varsa ChatMessage içinde gösterilir.
+         // Bu blok, mesajların sonunda genel bir yükleme belirtisi için düşünülebilir ama genellikle ChatInput yanında olur.
+         // Burada şimdilik yorum satırı olarak bırakıyorum, çünkü ChatMessage içindeki isLoading daha spesifik.
+        /*
+        <div className="flex justify-center items-center p-4">
+          <LoadingIndicator />
+        </div>
+        */
+      )}
+      <div ref={messagesEndRef} />
     </div>
   );
-}
+};
+
+export default memo(ChatMessages);
