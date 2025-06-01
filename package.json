@@ -9,6 +9,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
+    "electron:dev": "electron .",
+    "electron:build": "vite build && electron-builder"
   },
   "dependencies": {
     "@huggingface/inference": "^2.6.4",
