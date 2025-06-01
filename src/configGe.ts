@@ -2,15 +2,13 @@
 import type { Message, UserProfile, AISettings, DailyJournalEntry } from './types'; // Gerekli tipleri import et
 
 // Gemini API anahtarınızı ve model adınızı buraya ekleyin
-// Bu bilgileri güvenli bir şekilde saklamayı unutmayın (örn: .env dosyası)
 const GEMINI_API_KEY = 'AIzaSyCJxkoFwqfii8Y8mGEQ4cwiU4o0Anrh3gs'; // Kullanıcının sağladığı API anahtarı
-const GEMINI_MODEL_ID = 'gemini-pro'; // veya kullanmak istediğiniz Gemini modelinin ID'si
+// Model ID'sini güncelleyelim:
+const GEMINI_MODEL_ID = 'gemini-1.5-flash-latest'; // Eski: 'gemini-pro'
 
-const SITE_URL = 'https://buggyai.netlify.app'; // config.ts'den alınabilir veya burada tanımlanabilir
-const SITE_NAME = 'BuggyAI (Gemini)'; // config.ts'den alınabilir veya burada tanımlanabilir
+const SITE_URL = 'https://buggyai.netlify.app';
+const SITE_NAME = 'BuggyAI (Gemini)';
 
-// config.ts'deki SYSTEM_PROMPT mantığına benzer bir sistem mesajı tanımlayın.
-// Gemini API'sinin beklentilerine göre uyarlamanız gerekebilir.
 const SYSTEM_PROMPT_GEMINI = `Ben BuggyCompany tarafından geliştirilen ve Gemini tabanlı BuggyAI.
 {{#if userProfile}}
 Kullanıcı Bilgileri:
@@ -22,9 +20,8 @@ Lütfen bu bilgileri kullanarak daha kişisel bir iletişim kur.
 {{else}}
 Yeni bir kullanıcıyla tanışıyorum.
 {{/if}}
-Cevaplarında Markdown kullan.`; // TODO: Bu sistem mesajını Gemini'ye göre optimize edin.
+Cevaplarında Markdown kullan.`;
 
-// config.ts'deki formatJournalForPrompt fonksiyonuna benzer bir fonksiyon
 function formatJournalForPrompt(journal: DailyJournalEntry[] | null | undefined, maxDays: number = 2, maxLogsPerDay: number = 3): string {
   if (!journal || journal.length === 0) return "";
   let formattedJournal = "";
@@ -43,32 +40,27 @@ function formatJournalForPrompt(journal: DailyJournalEntry[] | null | undefined,
   return formattedJournal.trim();
 }
 
-
-// config.ts'deki AI_PROVIDERS benzeri bir yapı (Gemini için tek sağlayıcı)
 export const GEMINI_AI_PROVIDER = {
   id: 'gemini-ai',
   model: GEMINI_MODEL_ID,
 };
 
-// Gemini API'sine istek gönderecek ana fonksiyon
 export async function makeGeminiAPIRequest(
   messages: Message[],
   userProfile?: UserProfile | null,
   aiSettings?: AISettings | null,
   journal?: DailyJournalEntry[] | null
 ) {
-  const REQUEST_TIMEOUT = 30000; // 30 saniye
+  const REQUEST_TIMEOUT = 30000;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
   const localAISettings = aiSettings || JSON.parse(localStorage.getItem('aiSettings') || '{}');
-  const maxTokens = localAISettings.maxTokens || 2048; // Gemini'nin desteklediği max output tokens
+  const maxTokens = localAISettings.maxTokens || 2048; // Gemini modelleri farklı token limitlerine sahip olabilir, gerekirse ayarlanmalı
   const temperature = localAISettings.temperature || 0.7;
   const importantPoints = localAISettings.importantPoints || [];
   const discussedTopicsFromSettings = localAISettings.discussedTopics || [];
 
-
-  // Sistem mesajını oluşturma (config.ts'deki mantığa benzer)
   let systemPromptForRequest = SYSTEM_PROMPT_GEMINI;
   const recentJournalEntriesString = journal ? formatJournalForPrompt(journal) : "";
   if (recentJournalEntriesString) {
@@ -109,42 +101,47 @@ export async function makeGeminiAPIRequest(
     : systemPromptForRequest
   ).trim();
 
-  // Gemini'ye gönderilecek mesajları formatla
   const formattedApiMessages = messages.map((msg, index) => {
-    const messageParts: any[] = []; // Değişiklik: any[] olarak tip belirttik, inline_data ekleyebilmek için.
-    if (msg.content) {
-      // İlk kullanıcı mesajına sistem promptunu ekle
-      if (index === 0 && msg.role === 'user') {
-        messageParts.push({ text: systemPromptForRequest + "\n\n---\n\n" + msg.content });
-      } else {
-        messageParts.push({ text: msg.content });
-      }
+    const messageParts: any[] = [];
+    let currentContent = msg.content || "";
+
+    // İlk kullanıcı mesajına sistem promptunu ekle
+    if (index === 0 && msg.role === 'user') {
+      currentContent = systemPromptForRequest + "\n\n---\n\n" + currentContent;
     }
+    
+    if (currentContent.trim() !== "") {
+        messageParts.push({ text: currentContent });
+    }
+
     if (msg.images && msg.images.length > 0) {
       msg.images.forEach(imgBase64 => {
-        messageParts.push({
-          inline_data: {
-            mime_type: imgBase64.startsWith('data:image/png') ? 'image/png' : 'image/jpeg',
-            data: imgBase64.split(',')[1]
-          }
-        });
+        if (imgBase64) { // Boş veya tanımsız base64 stringlerini atla
+            messageParts.push({
+            inline_data: {
+                mime_type: imgBase64.startsWith('data:image/png') ? 'image/png' : 'image/jpeg',
+                data: imgBase64.split(',')[1]
+            }
+            });
+        }
       });
     }
     return {
       role: msg.role === 'assistant' ? 'model' : 'user',
-      parts: messageParts
+      parts: messageParts.filter(part => part.text !== "" || part.inline_data) // Boş text partlarını da filtrele
     };
-  });
+  }).filter(msg => msg.parts.length > 0); // Hiç part'ı olmayan mesajları filtrele
 
 
   const requestBody = {
-    contents: formattedApiMessages, // Sistem promptu ve geçmiş mesajlar
+    contents: formattedApiMessages,
     generationConfig: {
       temperature: temperature,
       maxOutputTokens: maxTokens,
     }
   };
   
+  // API URL'i v1beta olarak kalıyor, model adı güncellendi.
   const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_ID}:generateContent?key=${GEMINI_API_KEY}`;
 
   try {
@@ -162,7 +159,6 @@ export async function makeGeminiAPIRequest(
     if (!response.ok) {
       const errorBody = await response.text();
       console.error(`Gemini API Hatası (${response.status}):`, errorBody);
-      // Kullanıcıya daha anlaşılır bir hata mesajı göstermek için bir yapı kurulabilir.
       let userFriendlyError = `Gemini API isteği ${response.status} durumuyla başarısız oldu.`;
       try {
         const parsedError = JSON.parse(errorBody);
@@ -170,7 +166,6 @@ export async function makeGeminiAPIRequest(
           userFriendlyError += ` Detay: ${parsedError.error.message}`;
         }
       } catch (e) {
-        // errorBody JSON değilse olduğu gibi ekle
         userFriendlyError += ` Detay: ${errorBody}`;
       }
       throw new Error(userFriendlyError);
@@ -199,6 +194,6 @@ export async function makeGeminiAPIRequest(
   } catch (error) {
     clearTimeout(timeoutId);
     console.error('Gemini API isteği sırasında hata (configGe.ts):', error);
-    throw error; // Hata yeniden fırlatılıyor, böylece çağıran fonksiyon haberdar olur.
+    throw error;
   }
 }
