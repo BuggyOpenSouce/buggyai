@@ -1,3 +1,4 @@
+// src/config.ts
 export const AI_PROVIDERS = [
   {
     id: 'buggyai-1',
@@ -62,13 +63,16 @@ export const AI_PROVIDERS = [
     available: true,
     busy: false,
   },
+  // Eski HuggingFace girdisi Gemini için güncellendi:
   {
-    id: 'buggyai-hf',
-    key: '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',
-    model: 'Qwen/Qwen2.5-VL-32B-Instruct',
+    id: 'gemini-ai', // ID, configGe.ts'deki GEMINI_AI_PROVIDER ile tutarlı olacak şekilde güncellendi
+    // key alanı configGe.ts içinde yönetildiği için burada temsili bir değer veya yorum olabilir.
+    // makeGeminiAPIRequest fonksiyonu kendi içindeki GEMINI_API_KEY'i kullanır.
+    key: 'GEMINI_API_KEY_CONFIGGE_TS_ICINDE_YONETILIYOR',
+    model: 'gemini-pro', // Model, configGe.ts'de kullanılanla tutarlı
     available: true,
     busy: false,
-    type: 'huggingface'
+    type: 'gemini' // Tip 'gemini' olarak değiştirildi
   }
 ];
 
