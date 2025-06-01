@@ -1,141 +1,51 @@
 // project/src/confighuggingtext.ts
+import { InferenceClient } from "@huggingface/inference";
 
+// Use the same HF token as before
 export const HF_ACCESS_TOKEN = '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';
 
-export const HF_PROVIDERS = [
-  {
-    id: 'buggyai-hf',
-    name: 'BuggyAI-HF',
-    key: HF_ACCESS_TOKEN,
-    model: 'Qwen/Qwen2.5-VL-32B-Instruct',
-    available: true,
-    busy: false,
-  }
-];
+// Model ID from your new example
+const HF_MODEL_ID = "Qwen/Qwen3-235B-A22B";
 
-let currentProviderIndex = 0;
-const providerCooldowns = new Map<string, number>();
-const COOLDOWN_DURATION = 5 * 60 * 1000; // 5 minutes
-
-export function getCurrentHFProvider() {
-  while (
-    currentProviderIndex < HF_PROVIDERS.length &&
-    isProviderOnCooldown(HF_PROVIDERS[currentProviderIndex].id)
-  ) {
-    currentProviderIndex++;
-  }
-
-  if (currentProviderIndex >= HF_PROVIDERS.length) {
-    currentProviderIndex = 0;
-    if (isProviderOnCooldown(HF_PROVIDERS[currentProviderIndex].id)) {
-        throw new Error('All HuggingFace providers are currently on cooldown. Please try again in a few minutes.');
-    }
-  }
-
-  return {
-    ...HF_PROVIDERS[currentProviderIndex],
-    index: currentProviderIndex,
-  };
+// Type for messages based on common usage and your example
+interface ChatMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
 }
 
-export function setProviderCooldown(providerId: string) {
-  providerCooldowns.set(providerId, Date.now() + COOLDOWN_DURATION);
-}
-
-function isProviderOnCooldown(providerId: string): boolean {
-  const cooldownUntil = providerCooldowns.get(providerId);
-  if (!cooldownUntil) return false;
-  return Date.now() < cooldownUntil;
-}
-
-export async function makeHFAPIRequest(messages: any[]) {
-  // IMPORTANT FOR DEBUGGING "fetching blob" error:
-  // 1. CHECK BROWSER NETWORK TAB: Inspect the failing API request for status code, response headers, and response body.
-  // 2. TEST WITH TEXT-ONLY INPUT: Temporarily send a simple text message (no images) to see if the error persists.
-  //    If text-only works, the issue is highly related to the image data or multimodal payload.
-  //    Example: const testMessages = [{role: "user", content: "Hello world"}]; and use testMessages.
-  
-  const provider = getCurrentHFProvider();
-  
-  const HfInferenceModule = await import("@huggingface/inference");
-  const ClientConstructor = HfInferenceModule.HfInference;
-
-  if (typeof ClientConstructor !== 'function') {
-    console.error("Failed to correctly access the HfInference constructor. Actual imported module:", HfInferenceModule);
-    throw new TypeError("The resolved HfInference class is not a constructor. Check module exports.");
+export async function makeHFAPIRequest(messages: ChatMessage[]) {
+  if (!HF_ACCESS_TOKEN) {
+    console.error("HuggingFace Access Token is not set in src/confighuggingtext.ts");
+    throw new Error("HuggingFace Access Token is not configured.");
   }
 
-  const client = new ClientConstructor(provider.key);
+  const client = new InferenceClient(HF_ACCESS_TOKEN);
 
   try {
-    const payload = {
-      model: provider.model,
-      messages: messages,
-    };
-    
-    console.log("Using HfInference.request with payload (model and messages structure):", 
-      JSON.stringify({ 
-        model: payload.model, 
-        messages: payload.messages.map((m:any) => ({
-          role: m.role, 
-          contentType: typeof m.content, 
-          contentPreview: Array.isArray(m.content) ? m.content.map((c:any) => ({type: c.type, hasUrl: !!c.image_url?.url}) ) : (typeof m.content === 'string' ? m.content.substring(0,50) + "..." : m.content),
-          hasImages: Array.isArray(m.content) && m.content.some((c:any) => c.type === 'image_url') 
-        })) 
-      }, null, 2)
+    console.log(
+      `Making HuggingFace API request to model: ${HF_MODEL_ID} with messages:`,
+      JSON.stringify(messages, null, 2)
     );
 
-    const rawResponse = await client.request(payload);
+    const chatCompletion = await client.chatCompletion({
+      provider: "hf-inference", // As per your example
+      model: HF_MODEL_ID,       // Using model from your example
+      messages: messages,
+      // Optional: You might want to add parameters like max_tokens, temperature, etc.
+      // stream: false, // Default is typically false; set explicitly if your endpoint/library behaves differently
+    });
 
-    console.log("Raw response from HfInference.request:", JSON.stringify(rawResponse, null, 2));
-
-    let generatedContent = "";
-    if (typeof rawResponse === 'object' && rawResponse !== null) {
-      if (Array.isArray(rawResponse)) {
-        if (rawResponse.length > 0 && rawResponse[0]) {
-          const firstItem = rawResponse[0];
-          if (typeof firstItem.generated_text === 'string') {
-            generatedContent = firstItem.generated_text;
-          } else if (firstItem.message && typeof firstItem.message.content === 'string') {
-            generatedContent = firstItem.message.content;
-          } else if (typeof firstItem.text === 'string') {
-             generatedContent = firstItem.text;
-          }
-        }
-      } else {
-        const responseObject = rawResponse as any;
-        if (typeof responseObject.generated_text === 'string') {
-          generatedContent = responseObject.generated_text;
-        } else if (responseObject.choices && Array.isArray(responseObject.choices) && responseObject.choices.length > 0) {
-          if (responseObject.choices[0].message && typeof responseObject.choices[0].message.content === 'string') {
-            generatedContent = responseObject.choices[0].message.content;
-          } else if (typeof responseObject.choices[0].text === 'string') {
-            generatedContent = responseObject.choices[0].text;
-          }
-        } else if (typeof responseObject.text === 'string') {
-             generatedContent = responseObject.text;
-        }
-      }
-    }
-    if (!generatedContent && rawResponse) {
-      if (typeof rawResponse === 'string') {
-        generatedContent = rawResponse;
-      } else {
-        console.warn("Could not specifically parse meaningful content from rawResponse. Stringifying the response.");
-        generatedContent = JSON.stringify(rawResponse);
-      }
-    }
-
-    return {
-      id: 'hf-req-' + Date.now(),
-      choices: [ { message: { role: 'assistant', content: generatedContent, }, finish_reason: 'stop', index: 0, } ],
-      created: Math.floor(Date.now() / 1000),
-      model: provider.model,
-      object: 'chat.completion',
-    };
+    // The calling code in src/utils/api.ts expects a structure where it can find
+    // chatCompletion.choices[0].message.content.
+    // The example logs chatCompletion.choices[0].message, which usually is {role, content}.
+    // Returning the whole chatCompletion object should be compatible.
+    console.log("Received chat completion from HuggingFace:", JSON.stringify(chatCompletion, null, 2));
+    return chatCompletion;
 
   } catch (error: any) {
-    console.error('HuggingFace API Error (using HfInference.request):', error);
+    console.error('HuggingFace API Error in makeHFAPIRequest:', error);
+    
+    // Log detailed error information
     console.error('Error Name:', error.name);
     console.error('Error Message:', error.message);
     if (error.stack) {
@@ -147,6 +57,9 @@ export async function makeHFAPIRequest(messages: any[]) {
          console.error('Error Cause Stack:', (error.cause as any).stack);
       }
     }
+    
+    // Attempt to log details from a potential HTTP response error
+    // This was helpful in identifying the 404 earlier via Network Tab, though not always populated in caught 'error'
     if (error.response && typeof error.response.status === 'number') {
         console.error('Underlying Response Status (from error.response):', error.response.status);
         try {
@@ -155,10 +68,16 @@ export async function makeHFAPIRequest(messages: any[]) {
         } catch (e) {
             console.error('Could not get text from error.response body:', e);
         }
-    } else if (typeof error.status === 'number') {
+    } else if (typeof error.status === 'number') { // If the error object itself has a status
         console.error('Error Status (from error object directly):', error.status);
     }
     
-    throw error;
+    throw error; // Rethrow to allow calling function to handle it
   }
 }
+
+// Note: Functions like getCurrentHFProvider, setProviderCooldown, and the HF_PROVIDERS array
+// have been removed to align with "recreate this file entirely using this example code",
+// which implies a simpler, single-model setup for this file.
+// If you need provider rotation or multiple Hugging Face models managed by this file,
+// this new structure would need further adaptation.
