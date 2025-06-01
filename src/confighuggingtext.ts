@@ -49,6 +49,12 @@ function isProviderOnCooldown(providerId: string): boolean {
 }
 
 export async function makeHFAPIRequest(messages: any[]) {
+  // IMPORTANT FOR DEBUGGING "fetching blob" error:
+  // 1. CHECK BROWSER NETWORK TAB: Inspect the failing API request for status code, response headers, and response body.
+  // 2. TEST WITH TEXT-ONLY INPUT: Temporarily send a simple text message (no images) to see if the error persists.
+  //    If text-only works, the issue is highly related to the image data or multimodal payload.
+  //    Example: const testMessages = [{role: "user", content: "Hello world"}]; and use testMessages.
+  
   const provider = getCurrentHFProvider();
   
   const HfInferenceModule = await import("@huggingface/inference");
@@ -67,7 +73,6 @@ export async function makeHFAPIRequest(messages: any[]) {
       messages: messages,
     };
     
-    // Log the structure of the payload, especially the messages array, without excessively long data URLs.
     console.log("Using HfInference.request with payload (model and messages structure):", 
       JSON.stringify({ 
         model: payload.model, 
@@ -84,7 +89,6 @@ export async function makeHFAPIRequest(messages: any[]) {
 
     console.log("Raw response from HfInference.request:", JSON.stringify(rawResponse, null, 2));
 
-    // --- IMPORTANT: Parse rawResponse based on its actual structure ---
     let generatedContent = "";
     if (typeof rawResponse === 'object' && rawResponse !== null) {
       if (Array.isArray(rawResponse)) {
@@ -121,7 +125,6 @@ export async function makeHFAPIRequest(messages: any[]) {
         generatedContent = JSON.stringify(rawResponse);
       }
     }
-    // --- End of speculative parsing ---
 
     return {
       id: 'hf-req-' + Date.now(),
@@ -132,21 +135,18 @@ export async function makeHFAPIRequest(messages: any[]) {
     };
 
   } catch (error: any) {
-    console.error('HuggingFace API Error (using HfInference.request):', error); // Full error object
-    
+    console.error('HuggingFace API Error (using HfInference.request):', error);
     console.error('Error Name:', error.name);
     console.error('Error Message:', error.message);
     if (error.stack) {
         console.error('Error Stack:', error.stack);
     }
     if (error.cause) {
-      // The 'cause' property can often hold the underlying error
       console.error('Error Cause:', error.cause);
       if ((error.cause as any).stack) {
          console.error('Error Cause Stack:', (error.cause as any).stack);
       }
     }
-    // Check if error might be a Response object or has response-like properties
     if (error.response && typeof error.response.status === 'number') {
         console.error('Underlying Response Status (from error.response):', error.response.status);
         try {
@@ -155,7 +155,7 @@ export async function makeHFAPIRequest(messages: any[]) {
         } catch (e) {
             console.error('Could not get text from error.response body:', e);
         }
-    } else if (typeof error.status === 'number') { // If error itself has status
+    } else if (typeof error.status === 'number') {
         console.error('Error Status (from error object directly):', error.status);
     }
     
